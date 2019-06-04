@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
+set -e
 
-if [ "$COMPONENT" == "ASSEMBLE_RELEASE" ]; then
-  # Create a new directory that will contain out generated apk
-  mkdir $HOME/buildApk/
-
-  # Copy generated apk from build folder and README.md to the folder just created
-  cp -R app/build/outputs/apk/app-debug.apk $HOME/buildApk/
-  cp -R README.md $HOME/buildApk/
+export PUBLISH_BRANCH=${PUBLISH_BRANCH:-master}
+export DEVELOPMENT_BRANCH=${DEVELOPMENT_BRANCH:-development}
 
   # Setup git
   cd $HOME
@@ -18,18 +14,50 @@ if [ "$COMPONENT" == "ASSEMBLE_RELEASE" ]; then
   cp -Rf $HOME/buildApk/*
   cd apk
 
-  git checkout --orphan workaround
-  git add -A
+\cp -r ../app/build/outputs/apk/*/**.apk .
+\cp -r ../app/build/outputs/apk/debug/output.json debug-output.json
+\cp -r ../app/build/outputs/apk/release/output.json release-output.json
+\cp -r ../README.md .
 
-  # Commit and skip the tests for that commit
-  git commit -am "Travis build pushed [skip ci]"
 
-  git branch -D apk
-  git branch -m apk
+  # Signing Apps
 
-  # Push to the apk branch
-  git push origin apk --force --quiet> /dev/null
+if [ "$TRAVIS_BRANCH" == "$PUBLISH_BRANCH" ]; then
+    echo "Push to master branch detected, signing the app..."
+    # Retain apk files for testing
+    mv app-debug.apk phimpme-android-master-debug.apk
+    # Generate temporary apk for signing
+    cp app-release-unsigned.apk app-release-unaligned.apk
+    # TODO: Sign APK
+    # jarsigner -tsa http://timestamp.comodoca.com/rfc3161 -sigalg SHA1withRSA -digestalg SHA1 -keystore ../scripts/key.jks -storepass $STORE_PASS -keypass $KEY_PASS app-release-unaligned.apk $ALIAS
+    # Remove previous release-apk file
+    \rm -f app-release.apk
+    # Generate new release-apk file
+    ${ANDROID_HOME}/build-tools/28.0.3/zipalign -v -p 4 app-release-unaligned.apk app-release.apk
+    # Rename unsigned release apk to master
+    rm -f app-release-unaligned.apk
+    mv app-release-unsigned.apk phimpme-android-master-release.apk
+    # Push generated apk files to apk branch
+    git checkout apk
+    git add -A
+    git commit -am "Travis build pushed [master]"
+    git push origin apk --force --quiet> /dev/null
 fi
 
-exit 0
+if [ "$TRAVIS_BRANCH" == "$DEVELOPMENT_BRANCH" ]; then
+    echo "Push to development branch detected, generating apk..."
+    # Rename apks with dev prefixes
+    mv app-debug.apk phimpme-dev-debug.apk
+    mv app-release-unsigned.apk phimpme-dev-release.apk
+    # Push generated apk files to apk branch
+    git checkout apk
+    git add -A
+    git commit -am "Travis build pushed [development]"
+    git push origin apk --force --quiet> /dev/null
+fi
 
+# TODO: Publish App to Play Store
+if [ "$TRAVIS_BRANCH" == "$PUBLISH_BRANCH" ]; then
+    # gem install fastlane
+    # fastlane supply --apk app-release.apk --track alpha --json_key ../scripts/fastlane.json --package_name $PACKAGE_NAME
+fi
